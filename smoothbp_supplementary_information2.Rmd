@@ -76,12 +76,11 @@ if (utils::packageVersion("smoothbp") < .MIN_SMOOTHBP) {
   stop(sprintf(
     paste0("smoothbp %s is loaded from\n  %s\nbut >= %s is required.\n",
            ".libPaths()[1] = %s\n",
-           "Install the local build into THIS project's library, e.g.\n",
-           "  devtools::install('C:/Users/bindoffa/antigravity_projects/smoothbp')\n",
+           "Install smoothbp >= %s into this project's library,\n",
            "then restart R and re-knit."),
     utils::packageVersion("smoothbp"),
     dirname(system.file(package = "smoothbp")),
-    .MIN_SMOOTHBP, .libPaths()[1]))
+    .MIN_SMOOTHBP, .libPaths()[1], .MIN_SMOOTHBP))
 }
 ```
 

@@ -1,0 +1,18 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.positai
+data_flat/
+manuscript.docx
+supplementary.pdf
+
+# Rendered output
+*.html
+*_files/
+*.tex
+*.log
+smoothbp_supplementary_information2.pdf
+
+# Study data supplied to reviewers under agreement: never commit
+data/*.rds

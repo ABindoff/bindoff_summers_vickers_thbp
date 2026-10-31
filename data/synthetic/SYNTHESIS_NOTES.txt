@@ -1,0 +1,3 @@
+synthpop 1.9.3, seed 2026, method cart (first variable sampled), smoothing spline, cart.minbucket 10
+Joint synthesis of lang, epis, wm, ef from one wide file (37 columns); replicated uniques on keys Group, Sex, Age_t1, education_total removed.
+These data are synthetic and will not reproduce the published estimates.

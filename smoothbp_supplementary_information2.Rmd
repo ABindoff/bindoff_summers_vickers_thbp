@@ -1,0 +1,969 @@
+---
+title: "Supplementary Information"
+subtitle: Cognitive trajectories in the Tasmanian Healthy Brain Project
+author: "Bindoff, A. D."
+date: '`r format(Sys.Date(), "%d %B %Y")`'
+mainfont: Cambria
+mathfont: Cambria Math
+monofont: Consolas
+geometry: margin=0.75in
+header-includes:
+  - \usepackage{float}
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    keep_tex: true
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    theme: flatly
+    highlight: tango
+    self_contained: true
+    math_method: mathjax
+---
+
+```{css, echo = FALSE}
+/* ---- Layout ------------------------------------------------------------- */
+.main-container { max-width: 1100px; }
+h1.title    { font-size: 2.1em; margin-bottom: .2em; }
+h3.subtitle { font-size: 1.35em; color: #555; margin-top: 0; }
+h2 { margin-top: 2.2em; padding-bottom: .25em; border-bottom: 1px solid #dcdcdc; }
+h3 { margin-top: 1.6em; }
+p  { line-height: 1.6; }
+
+/* ---- Tables ------------------------------------------------------------- */
+.gt_table { margin-top: 1.2em !important; margin-bottom: 1.6em !important; }
+.gt_table td, .gt_table th { font-variant-numeric: tabular-nums; }
+.gt_title { text-align: left !important; }
+.gt_subtitle { text-align: left !important; color: #555 !important; }
+
+/* ---- Figure captions ---------------------------------------------------- */
+.fig-caption { font-size: .95em; color: #333; margin: .6em 0 1.2em 0; }
+.render-info { font-size: .9em; color: #777; margin-bottom: 1.5em; }
+
+/* ---- Collapsible model reports ----------------------------------------- */
+details.model-report { margin: .4em 0; border: 1px solid #e3e3e3; border-radius: 4px; }
+details.model-report > summary { padding: .45em .8em; cursor: pointer; font-weight: 600;
+                                 background: #f7f7f7; }
+details.model-report pre { margin: 0; border: 0; border-radius: 0; font-size: 11px;
+                           line-height: 1.35; overflow-x: auto; white-space: pre; }
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+set.seed(260521)
+
+library(tidyverse)
+library(smoothbp)
+library(brms)       # group-membership logistic model only
+library(gt)
+options(smoothbp.cores = parallel::detectCores())
+
+# ---------------------------------------------------------------------------
+# Version guard. smoothbp 0.2.8 fixes a NUTS proposal-rule error in the
+# random-effects sampler that affects every random-intercept fit produced by
+# 0.2.x, so a render against an earlier build is invalid rather than merely
+# out of date.
+# ---------------------------------------------------------------------------
+.MIN_SMOOTHBP <- "0.2.8"
+if (utils::packageVersion("smoothbp") < .MIN_SMOOTHBP) {
+  stop(sprintf(
+    paste0("smoothbp %s is loaded from\n  %s\nbut >= %s is required.\n",
+           ".libPaths()[1] = %s\n",
+           "Install the local build into THIS project's library, e.g.\n",
+           "  devtools::install('C:/Users/bindoffa/antigravity_projects/smoothbp')\n",
+           "then restart R and re-knit."),
+    utils::packageVersion("smoothbp"),
+    dirname(system.file(package = "smoothbp")),
+    .MIN_SMOOTHBP, .libPaths()[1]))
+}
+```
+
+```{r supplement-registry, include = FALSE}
+# ---------------------------------------------------------------------------
+# Single source of truth for supplementary numbering. Headings, table titles
+# and in-text cross-references all read from here, so re-ordering the
+# supplement means editing these three vectors and nothing else.
+# See supplementary_label_map.md for the mapping to the previous S-numbering.
+# ---------------------------------------------------------------------------
+NOTE <- c(exclusions   = 1, selection  = 2, coefficients = 3, diagnostics = 4,
+          sharpness    = 5, transition = 6, subtests     = 7, attrition   = 8,
+          sbc          = 9, ppc        = 10)
+
+TAB  <- c(exclusions   = 1, selection    = 2, coefficients  = 3,
+          convergence  = 4, loo          = 5, rho_grid      = 6,
+          er_resolution = 7, omega_bounds = 8, omega_group  = 9,
+          subtests     = 10, waves       = 11, baseline_attrition = 12,
+          attrition_refit = 13)
+
+FIG  <- c(ppc = 1)
+
+sn <- function(k) sprintf("Supplementary Note %d",  NOTE[[k]])
+st <- function(k) sprintf("Supplementary Table %d", TAB[[k]])
+sf <- function(k) sprintf("Supplementary Fig. %d",  FIG[[k]])
+
+# Display labels
+DOMAINS <- c(episodic  = "Episodic memory",    working  = "Working memory",
+             executive = "Executive function", language = "Language processing")
+```
+
+```{r data-prep, include = FALSE}
+# ---------------------------------------------------------------------------
+# SYNTHETIC DATA. The study data cannot be shared, so this supplement reads the
+# synthetic release in data/synthetic/ (made by thbp_synthesise_all_domains.R).
+# Every number it produces will differ from the submitted supplement.
+#
+# The synthetic files hold the composite domain scores directly (one row per
+# participant-wave, executive function already sign-reversed so higher is
+# better, covariates already standardised), so the sub-test z-scoring and
+# compositing that was here is replaced by the lines below (the method is in the
+# manuscript Methods). The objects built here have the
+# same names and columns as before, so nothing downstream is changed.
+# ---------------------------------------------------------------------------
+read_domain <- function(file)
+  read.csv(file.path('data/synthetic', file)) |> mutate(IDCode = factor(IDCode))
+
+episodic  <- read_domain('epis.csv')
+working   <- read_domain('wm.csv')
+executive <- read_domain('ef.csv')
+language  <- read_domain('lang.csv')
+
+# d3: one row per participant-wave with the four composites side by side, as
+# before (executive un-flipped, as it was here before the flip). Waves are
+# matched across domains on years since baseline, and on order within a year
+# when two assessments fall in the same year.
+waves <- bind_rows(episodic = episodic, working = working,
+                   executive = executive, language = language, .id = 'name') |>
+  group_by(name, IDCode, years_since_baseline) |>
+  mutate(k = row_number()) |>
+  ungroup()
+
+d3 <- waves |>
+  select(IDCode, Group, years_since_baseline, k, name, value) |>
+  pivot_wider(names_from = name, values_from = value) |>
+  arrange(IDCode, years_since_baseline, k) |>
+  group_by(IDCode) |>
+  mutate(phase = row_number()) |>
+  ungroup() |>
+  mutate(executive = -executive)
+
+# demographics: one row per participant; Sessions = assessment waves completed
+demographics <- waves |>
+  distinct(IDCode, Group, Sex, Age_t1, education_total, wtar_fsiq_baseline,
+           drs_tot_raw_baseline, hads_anx_baseline, hads_dep_baseline) |>
+  left_join(count(d3, IDCode, name = 'Sessions'), by = 'IDCode')
+```
+
+```{r posterior-helpers, include = FALSE}
+# Draws as a plain data.frame, dropping posterior's .chain/.iteration/.draw columns
+.draws <- function(m) {
+  d <- as.data.frame(posterior::as_draws_df(m$draws))
+  d[, !grepl("^\\.", names(d)), drop = FALSE]
+}
+
+# Posterior draws of a parameter or of a sum of parameters
+.combo <- function(m, vars) {
+  d <- .draws(m)
+  miss <- setdiff(vars, names(d))
+  if (length(miss)) stop("Parameter(s) not found in draws: ", paste(miss, collapse = ", "))
+  if (length(vars) == 1L) d[[vars]] else rowSums(d[, vars, drop = FALSE])
+}
+
+post <- function(m, vars, probs = c(.025, .975)) {
+  x <- .combo(m, vars)
+  c(mean = mean(x),
+    lo   = unname(quantile(x, probs[1])),
+    hi   = unname(quantile(x, probs[2])))
+}
+
+ci  <- function(v, digits = 2)
+  sprintf("%.*f [%.*f, %.*f]", digits, v[["mean"]], digits, v[["lo"]], digits, v[["hi"]])
+pci <- function(m, vars, digits = 2) ci(post(m, vars), digits)
+pH  <- function(m, vars) mean(.combo(m, vars) > 0)
+
+er_of  <- function(p) if (p >= 1) Inf else p / (1 - p)
+fmt_er <- function(p, digits = 1) {
+  er <- er_of(p)
+  if (!is.finite(er) || er > 1000) "> 1000" else formatC(er, format = "f", digits = digits)
+}
+fmt_p <- function(p, digits = 3) formatC(p, format = "f", digits = digits)
+
+# Frequentist p-values for display: "< 0.001" rather than "0.000"
+fmt_pval <- function(p, digits = 3)
+  ifelse(p < 10^-digits, paste0("< ", formatC(10^-digits, format = "f", digits = digits)),
+         formatC(p, format = "f", digits = digits))
+
+n_against <- function(m, vars) sum(.combo(m, vars) <= 0)
+
+conv <- function(m) {
+  s <- posterior::summarise_draws(m$draws, "rhat", "ess_bulk", "ess_tail")
+  s <- s[!is.na(s$rhat), ]
+  list(max_rhat = max(s$rhat), min_bulk = min(s$ess_bulk), min_tail = min(s$ess_tail),
+       n_div = m$n_divergent)
+}
+
+GB1 <- "b1_GroupExperimental"
+GD1 <- "delta1_GroupExperimental"
+```
+
+```{r table-style, include = FALSE}
+# ---------------------------------------------------------------------------
+# House style for supplementary tables. `key` indexes TAB, so the table
+# number in the title always agrees with the registry.
+# ---------------------------------------------------------------------------
+supp_gt <- function(data, key, title, subtitle = NULL, pdf_font = 11, ...) {
+  pdf <- knitr::is_latex_output()
+  tbl <- gt::gt(data, id = paste0("tab-", gsub("_", "-", key)), ...) |>
+    gt::tab_header(
+      title    = gt::md(sprintf("**%s.** %s", st(key), title)),
+      subtitle = if (is.null(subtitle)) NULL else gt::md(subtitle)
+    ) |>
+    gt::opt_align_table_header(align = "left") |>
+    gt::tab_options(
+      table.width                       = gt::pct(100),
+      table.font.size                   = gt::px(14),
+      heading.title.font.size           = gt::px(16),
+      heading.subtitle.font.size        = gt::px(13.5),
+      heading.padding                   = gt::px(4),
+      heading.border.bottom.color       = "#333333",
+      heading.border.bottom.width       = gt::px(2),
+      table.border.top.style            = "hidden",
+      column_labels.font.weight         = "bold",
+      column_labels.background.color    = "#f4f6f8",
+      column_labels.border.bottom.color = "#333333",
+      column_labels.border.bottom.width = gt::px(1),
+      row_group.font.weight             = "bold",
+      row_group.background.color        = "#fafafa",
+      row_group.border.top.color        = "#bbbbbb",
+      table_body.border.bottom.color    = "#333333",
+      table_body.border.bottom.width    = gt::px(2),
+      data_row.padding                  = gt::px(5),
+      footnotes.font.size               = gt::px(12.5),
+      source_notes.font.size            = gt::px(12.5)
+    )
+  if (pdf) {
+    # PDF: shrink to fit the text block, and pin each table where it is written
+    # instead of letting it float ([t] by default), which detached tables from
+    # their notes. latex.tbl.pos needs gt >= 0.11.
+    tbl <- gt::tab_options(tbl, table.font.size = gt::px(pdf_font))
+    if ("latex.tbl.pos" %in% names(formals(gt::tab_options)))
+      tbl <- gt::tab_options(tbl, latex.tbl.pos = "H")
+    else
+      warning("gt < 0.11: tables will float in the PDF; update gt to pin them in place.")
+  }
+  tbl
+}
+
+# Raw variable/term-name columns are kept in the HTML but dropped from the PDF,
+# where they push wide tables off the page.
+pdf_hide <- function(tbl, columns)
+  if (knitr::is_latex_output()) gt::cols_hide(tbl, {{ columns }}) else tbl
+
+# Column labels and spanners with Greek/maths. gt passes html() content through
+# verbatim in both formats, so give each format its own markup: HTML entities for
+# the HTML output, LaTeX maths (with % escaped) for the PDF.
+lab <- function(html, latex) gt::html(if (knitr::is_latex_output()) latex else html)
+
+# Monospace for raw variable / term names
+mono <- function(tbl, columns)
+  gt::tab_style(tbl, gt::cell_text(font = "monospace", size = gt::px(12.5), color = "#555"),
+                gt::cells_body(columns = {{ columns }}))
+```
+
+```{r model-priors, include = FALSE}
+THBP_PRIORS <- smoothbp_priors(
+  b0      = prior_normal(0, 2),
+  b1      = prior_normal(0, 2),
+  deltas  = prior_normal(0, 1),
+  omega   = list(list("(Intercept)" = prior_normal(3, 2, lb = 1, ub = 6))),
+  rho     = prior_normal(2, 2, lb = 1),   # not used: rho is fixed below
+  sigma   = prior_invgamma(shape = 2, scale = 1),
+  sigma_u = prior_invgamma(shape = 2, scale = 1)
+)
+
+fit_domain <- function(dat, seed = 42L) {
+  smoothbp(
+    formula = value ~ years_since_baseline,
+    b0      = ~ 1 + Group + education_total_s + Age_t1_s + Sex +
+                hads_anx_baseline + hads_dep_baseline +
+                wtar_fsiq_baseline_s + drs_tot_raw_baseline_s +
+                (1 | IDCode),
+    b1      = ~ 1 + Group,
+    deltas  = list(~ 1 + Group),
+    omega   = list(~ 1),
+    rho     = list(fixed(3)),
+    data    = dat,
+    priors  = THBP_PRIORS,
+    chains  = 4L, iter = 10000L, warmup = 5000L,
+    target_accept = 0.99, seed = seed
+  )
+}
+```
+
+```{r fit-episodic, include = FALSE}
+m.ep <- fit_domain(episodic)
+```
+
+```{r fit-working, include = FALSE}
+m.wo <- fit_domain(working)
+```
+
+```{r fit-executive, include = FALSE}
+m.ex <- fit_domain(executive)
+```
+
+```{r fit-language, include = FALSE}
+m.la <- fit_domain(language)
+```
+
+```{r model-list, include = FALSE}
+MODELS <- setNames(list(m.ep, m.wo, m.ex, m.la), DOMAINS)
+```
+
+```{r fit-selection, include = FALSE}
+m.group <- brm(
+  bf(Group ~ scale(education_total) +
+               scale(Age_t1) +
+               Sex +
+               hads_anx_baseline +
+               hads_dep_baseline +
+               scale(wtar_fsiq_baseline) +
+               scale(drs_tot_raw_baseline)),
+  family = bernoulli(),
+  data   = demographics
+)
+```
+
+```{r fit-completion, include = FALSE}
+add_sessions <- function(dat) {
+  dat |>
+    left_join(demographics |> select(IDCode, Sessions), by = 'IDCode') |>
+    mutate(Sessions_s = as.numeric(scale(Sessions))) |>
+    dplyr::filter(!is.na(Sessions_s))
+}
+
+episodic_s <- add_sessions(episodic)
+language_s <- add_sessions(language)
+
+fit_sessions <- function(dat, seed = 42L) {
+  smoothbp(
+    formula = value ~ years_since_baseline,
+    b0      = ~ 1 + Group + Sessions_s + education_total_s + Age_t1_s + Sex +
+                hads_anx_baseline + hads_dep_baseline +
+                wtar_fsiq_baseline_s + drs_tot_raw_baseline_s +
+                (1 | IDCode),
+    b1      = ~ 1 + Group + Sessions_s,
+    deltas  = list(~ 1 + Group),
+    omega   = list(~ 1),
+    rho     = list(fixed(3)),
+    data    = dat,
+    priors  = THBP_PRIORS,
+    chains  = 4L, iter = 10000L, warmup = 5000L,
+    target_accept = 0.99, seed = seed
+  )
+}
+
+m.ep.s <- fit_sessions(episodic_s)
+m.la.s <- fit_sessions(language_s)
+```
+
+<!-- ===================================================================== -->
+<!--                      SUPPLEMENTARY INFORMATION                        -->
+<!-- ===================================================================== -->
+
+::: {.render-info}
+All models fitted with `smoothbp` `r packageVersion("smoothbp")`; rendered with
+`r R.version.string`.
+:::
+
+## `r sn("exclusions")` — Available-case exclusions {#note-exclusions}
+
+```{r tab-exclusions}
+tibble(
+  Domain       = unname(DOMAINS),
+  N_attempted  = nrow(d3),
+  N_analysed   = c(nrow(episodic), nrow(working), nrow(executive), nrow(language))
+) |>
+  mutate(N_excluded   = N_attempted - N_analysed,
+         Pct_excluded = 100 * N_excluded / N_attempted) |>
+  supp_gt("exclusions", "Available-case exclusions by cognitive domain",
+          subtitle = paste("A participant-wave is excluded from a domain when any constituent",
+                           "sub-test, or the assessment time, is missing.")) |>
+  gt::cols_label(N_attempted  = "Participant-waves attempted",
+                 N_analysed   = "Analysed",
+                 N_excluded   = "Excluded",
+                 Pct_excluded = "% excluded") |>
+  gt::fmt_integer(columns = c(N_attempted, N_analysed, N_excluded)) |>
+  gt::fmt_number(columns = Pct_excluded, decimals = 1) |>
+  gt::cols_align("left", columns = Domain)
+```
+
+## `r sn("selection")` — Predictors of group membership {#note-selection}
+
+```{r tab-selection}
+fe <- brms::fixef(m.group)
+hy <- brms::hypothesis(m.group, c(
+  'scaleeducation_total > 0',
+  'scaleAge_t1 < 0',
+  'SexMale < 0',
+  'hads_anx_baseline > 0',
+  'hads_dep_baseline < 0',
+  'scalewtar_fsiq_baseline > 0',
+  'scaledrs_tot_raw_baseline > 0'
+))$hypothesis
+
+r2_bayes <- brms::bayes_R2(m.group)[1, "Estimate"]
+n_group  <- stats::nobs(m.group)
+
+sel_terms <- tibble::tribble(
+  ~term,                        ~label,                                 ~dir,
+  "Intercept",                  "Intercept",                            NA,
+  "scaleeducation_total",       "Education (years, standardised)",      "> 0",
+  "scaleAge_t1",                "Age at baseline (standardised)",       "< 0",
+  "SexMale",                    "Sex: male",                            "< 0",
+  "hads_anx_baseline",          "HADS anxiety, baseline",               "> 0",
+  "hads_dep_baseline",          "HADS depression, baseline",            "< 0",
+  "scalewtar_fsiq_baseline",    "WTAR premorbid IQ (standardised)",     "> 0",
+  "scaledrs_tot_raw_baseline",  "DRS total, baseline (standardised)",   "> 0"
+)
+
+sel_tbl <- sel_terms |>
+  mutate(
+    or    = sprintf("%.2f [%.2f, %.2f]", exp(fe[term, "Estimate"]),
+                    exp(fe[term, "Q2.5"]), exp(fe[term, "Q97.5"])),
+    h_est = c(NA, sprintf("%.2f [%.2f, %.2f]", hy$Estimate, hy$CI.Lower, hy$CI.Upper)),
+    h_er  = c(NA, sprintf("%.2f", hy$Evid.Ratio)),
+    h_pp  = c(NA, sprintf("%.2f", hy$Post.Prob))
+  )
+
+sel_tbl |>
+  select(label, term, or, dir, h_est, h_er, h_pp) |>
+  supp_gt("selection",
+          "Bayesian logistic regression of group membership on baseline covariates",
+          subtitle = sprintf(paste(
+            "Outcome: Education group (vs Control); N = %d. Bayesian R² = %.3f:",
+            "approximately %.0f%% of the variance in group membership is explained by",
+            "these seven variables jointly."), n_group, r2_bayes, 100 * r2_bayes)) |>
+  gt::cols_label(label = "Predictor", term = "Term", or = "Odds ratio [95% CrI]",
+                 dir = "Direction", h_est = "Log-odds [90% CrI]",
+                 h_er = "ER", h_pp = "P(H)") |>
+  gt::tab_spanner("Directional hypothesis", columns = c(dir, h_est, h_er, h_pp)) |>
+  gt::sub_missing(missing_text = "—") |>
+  gt::cols_align("left",  columns = c(label, term)) |>
+  gt::cols_align("right", columns = c(or, dir, h_est, h_er, h_pp)) |>
+  mono(term) |>
+  pdf_hide(term) |>
+  gt::tab_footnote(
+    "One-sided hypotheses: credible intervals are 90%. ER = evidence ratio, P(H)/(1 − P(H)).",
+    locations = gt::cells_column_spanners("Directional hypothesis"))
+```
+
+## `r sn("coefficients")` — Full posterior summaries of the trajectory models {#note-coefficients}
+
+Throughout, `Group` is coded `Control`/`Experimental` in the raw data and this level name
+appears wherever model output is printed directly (e.g. `GroupExperimental`). In the main
+text, figures and Table 1 the same arm is called "Education".
+
+```{r tab-coefficients}
+COEF_ROWS <- tibble::tribble(
+  ~block,                                        ~term,                        ~label,
+  "β₀ — Intercept and covariates",    "b0_(Intercept)",             "Intercept",
+  "β₀ — Intercept and covariates",    "b0_GroupExperimental",       "Group: Education",
+  "β₀ — Intercept and covariates",    "b0_education_total_s",       "Education (years, standardised)",
+  "β₀ — Intercept and covariates",    "b0_Age_t1_s",                "Age at baseline (standardised)",
+  "β₀ — Intercept and covariates",    "b0_SexMale",                 "Sex: male",
+  "β₀ — Intercept and covariates",    "b0_hads_anx_baseline",       "HADS anxiety, baseline",
+  "β₀ — Intercept and covariates",    "b0_hads_dep_baseline",       "HADS depression, baseline",
+  "β₀ — Intercept and covariates",    "b0_wtar_fsiq_baseline_s",    "WTAR premorbid IQ (standardised)",
+  "β₀ — Intercept and covariates",    "b0_drs_tot_raw_baseline_s",  "DRS total, baseline (standardised)",
+  "β₁ — Pre-transition slope",        "b1_(Intercept)",             "Intercept",
+  "β₁ — Pre-transition slope",        "b1_GroupExperimental",       "Group: Education",
+  "δ₁ — Slope change at transition",  "delta1_(Intercept)",         "Intercept",
+  "δ₁ — Slope change at transition",  "delta1_GroupExperimental",   "Group: Education",
+  "ω₁ — Transition point (years)",    "omega1_(Intercept)",         "Intercept",
+  "ρ₁ — Transition sharpness",        "rho1_(Intercept)",           "Intercept",
+  "Variance components",                         "sigma",                      "σ, residual SD",
+  "Variance components",                         "sigma_u",                    "σᵤ, random-intercept SD"
+)
+
+coef_cell <- function(d, term) {
+  if (!term %in% names(d)) {
+    # random-intercept SD may carry a grouping suffix (e.g. sigma_u_IDCode)
+    hit <- grep(paste0("^", term), names(d), value = TRUE)
+    if (!length(hit)) return(NA_character_)
+    term <- hit[1]
+  }
+  x <- d[[term]]
+  if (sd(x) == 0) return(sprintf("%.2f (fixed)", x[1]))
+  sprintf("%.2f [%.2f, %.2f]", mean(x), quantile(x, .025), quantile(x, .975))
+}
+
+coef_tbl <- COEF_ROWS
+for (k in names(DOMAINS)) {
+  d <- .draws(MODELS[[DOMAINS[[k]]]])
+  coef_tbl[[k]] <- vapply(COEF_ROWS$term, coef_cell, character(1), d = d)
+}
+
+coef_tbl |>
+  supp_gt("coefficients",
+          "Posterior summaries for all trajectory-model parameters, by cognitive domain",
+          subtitle = "Posterior mean [95% credible interval]. Slopes are z per year.",
+          groupname_col = "block", pdf_font = 10) |>
+  gt::cols_label(label = "Parameter", term = "Term",
+                 episodic = DOMAINS[["episodic"]], working  = DOMAINS[["working"]],
+                 executive = DOMAINS[["executive"]], language = DOMAINS[["language"]]) |>
+  gt::sub_missing(missing_text = "—") |>
+  gt::cols_align("left",  columns = c(label, term)) |>
+  gt::cols_align("right", columns = all_of(names(DOMAINS))) |>
+  mono(term) |>
+  pdf_hide(term)
+```
+
+## `r sn("diagnostics")` — Convergence and cross-validation diagnostics {#note-diagnostics}
+
+```{r tab-convergence}
+tibble(Domain = names(MODELS)) |>
+  bind_cols(bind_rows(lapply(MODELS, function(m) as_tibble(conv(m))))) |>
+  supp_gt("convergence", "MCMC convergence diagnostics by domain",
+          subtitle = "4 chains × 5,000 post-warmup iterations (20,000 draws) per model.") |>
+  gt::cols_label(max_rhat = lab("Max R&#770;", "Max $\\hat{R}$"), min_bulk = "Min bulk ESS",
+                 min_tail = "Min tail ESS", n_div = "Divergent transitions") |>
+  gt::fmt_number(columns = max_rhat, decimals = 3) |>
+  gt::fmt_number(columns = c(min_bulk, min_tail), decimals = 0) |>
+  gt::cols_align("left", columns = Domain)
+```
+
+Full per-domain reports, including the fitted model with posterior means substituted and
+asymptotic pre- and post-transition slopes`r if (knitr::is_html_output()) " (select a domain to expand)"`:
+
+```{r model-reports, results = 'asis'}
+for (nm in names(MODELS)) {
+  out <- utils::capture.output(model_results(MODELS[[nm]]))
+  if (knitr::is_html_output()) {
+    cat("\n```{=html}\n",
+        '<details class="model-report"><summary>', htmltools::htmlEscape(nm),
+        " — full model report</summary>\n<pre>",
+        htmltools::htmlEscape(paste(out, collapse = "\n")),
+        "</pre></details>\n```\n\n", sep = "")
+  } else {
+    # PDF: each report as a plain verbatim block under a bold domain label
+    cat("\n**", nm, "**\n\n```\n", paste(out, collapse = "\n"), "\n```\n\n", sep = "")
+  }
+}
+```
+
+Leave-one-out cross-validation is reported here as a diagnostic rather than as a model
+comparison. It is used only as a secondary check on structural specification and not to
+select among reported effect estimates, because its importance-sampling approximation is
+not fully reliable for this model class: Pareto-$\hat{k}$ exceeds 0.7 for a small number of
+observations in every domain and exceeds 1 in executive function and language processing.
+
+```{r tab-loo}
+loo_list <- lapply(MODELS, loo)
+
+bind_rows(lapply(names(loo_list), function(nm) {
+  l <- loo_list[[nm]]
+  k <- tryCatch(loo::pareto_k_values(l), error = function(e) l$diagnostics$pareto_k)
+  tibble(Domain = nm,
+         n_obs  = length(k),
+         elpd   = sprintf("%.1f (%.1f)", l$estimates["elpd_loo", "Estimate"],
+                                         l$estimates["elpd_loo", "SE"]),
+         p_loo  = l$estimates["p_loo", "Estimate"],
+         k_hi   = sum(k > 0.7 & k <= 1),
+         k_vhi  = sum(k > 1))
+})) |>
+  supp_gt("loo", "Leave-one-out cross-validation diagnostics",
+          subtitle = "Reported as a diagnostic, not used for model selection.") |>
+  gt::cols_label(n_obs = "Observations", elpd = "elpd_loo (SE)", p_loo = "p_loo",
+                 k_hi = "(0.7, 1]", k_vhi = "> 1") |>
+  gt::tab_spanner(lab("Observations with Pareto k&#770;", "Observations with Pareto $\\hat{k}$"), columns = c(k_hi, k_vhi)) |>
+  gt::fmt_integer(columns = n_obs) |>
+  gt::fmt_number(columns = p_loo, decimals = 1) |>
+  gt::cols_align("left", columns = Domain) |>
+  gt::cols_align("right", columns = elpd)
+```
+
+## `r sn("sharpness")` — Sensitivity to transition sharpness ($\rho$) {#note-sharpness}
+
+All four domains were refitted at $\rho \in \{2, 3, 5\}$ and with $\rho$ estimated under
+$N(2,2)$ truncated at 1 (`sensitivity_3.1_rho_grid.R`).
+
+```{r tab-rho-grid, eval = file.exists("sensitivity_3.1_rho_grid_table.csv")}
+read.csv('sensitivity_3.1_rho_grid_table.csv') |>
+  transmute(Domain = unname(DOMAINS[domain]),
+            rho    = as.character(rho_setting),
+            omega  = sprintf("%.2f [%.2f, %.2f]", omega_mean, omega_q5, omega_q95),
+            d1grp  = sprintf("%.3f [%.3f, %.3f]", delta1_grp_mean,
+                             delta1_grp_q5, delta1_grp_q95),
+            ph_b1  = sprintf("%.3f", PH_b1grp),
+            ph_sum = sprintf("%.4f", PH_b1grp_d1grp),
+            # From the evidence ratio, not from P(H): the stored P(H) is rounded
+            # to four decimals, which cannot resolve three draws from four out
+            # of 20,000. ER = (N - k) / k, so k = N / (ER + 1).
+            against = round(20000 / (ER_b1grp_d1grp + 1))) |>
+  supp_gt("rho_grid",
+          "Sensitivity of the transition point and group contrasts to transition sharpness",
+          subtitle = "Intervals are 90%. Conclusions are unchanged across settings.",
+          groupname_col = "Domain") |>
+  gt::cols_label(rho    = lab("&rho;", "$\\rho$"),
+                 omega  = lab("&omega; [90% CrI]", "$\\omega$ [90\\% CrI]"),
+                 d1grp  = lab("&delta;<sub>1</sub> group [90% CrI]", "$\\delta_1$ group [90\\% CrI]"),
+                 ph_b1  = lab("&beta;<sub>1</sub> group", "$\\beta_1$ group"),
+                 ph_sum = lab("&beta;<sub>1</sub> + &delta;<sub>1</sub> group", "$\\beta_1 + \\delta_1$ group"),
+                 against = lab("Draws against &beta;<sub>1</sub> + &delta;<sub>1</sub>", "Draws against $\\beta_1 + \\delta_1$")) |>
+  gt::tab_spanner("P(H)", columns = c(ph_b1, ph_sum)) |>
+  gt::fmt_integer(columns = against) |>
+  gt::cols_align("left", columns = rho) |>
+  gt::cols_align("right", columns = c(omega, d1grp, ph_b1, ph_sum, against))
+```
+
+Posterior intervals for $\omega$ and $\delta_1$ are stable across settings, maximum $\hat{R}$ = 1.012, minimum bulk effective
+sample size 541. The evidence ratio for the language post-transition contrast is less
+stable: it takes values between roughly 5000 and 6700 across these fits, corresponding to
+four or three draws out of 20,000 falling against the hypothesis. A ratio fixed by a
+handful of draws reflects Monte Carlo variation in the extreme tail rather than sensitivity
+of the finding, and is the basis for the reporting convention described
+[below](#resolution-of-evidence-ratios).
+
+### Resolution of evidence ratios {#resolution-of-evidence-ratios}
+
+With 20,000 posterior draws, an evidence ratio of 1000 corresponds to 20 draws falling against the
+hypothesis. The Monte Carlo standard error on
+such counts is of the same order as the counts themselves, so the numerical value of a large
+evidence ratio is not a stable summary of the evidence: across transition-sharpness settings
+that leave the posterior interval essentially unchanged, the same contrast yields ratios of
+roughly 5000 or 6700 depending on whether four draws or three fall against it.
+
+We therefore cap reported evidence ratios at "> 1000" and interpret contrasts in that range
+by their posterior intervals. Draw counts against each hypothesis:
+
+```{r tab-er-resolution}
+tibble(
+  Domain  = names(MODELS),
+  b1      = vapply(MODELS, n_against, numeric(1), vars = GB1),
+  b1d1    = vapply(MODELS, n_against, numeric(1), vars = c(GB1, GD1))
+) |>
+  supp_gt("er_resolution", "Posterior draws falling against each directional hypothesis",
+          subtitle = "Out of 20,000 posterior draws per model. Hypothesis: Education > Control.") |>
+  gt::cols_label(b1   = lab("&beta;<sub>1</sub> group", "$\\beta_1$ group"),
+                 b1d1 = lab("&beta;<sub>1</sub> + &delta;<sub>1</sub> group", "$\\beta_1 + \\delta_1$ group")) |>
+  gt::tab_spanner("Draws against hypothesis", columns = c(b1, b1d1)) |>
+  gt::fmt_integer(columns = c(b1, b1d1)) |>
+  gt::cols_align("left", columns = Domain)
+```
+
+## `r sn("transition")` — Specification checks on the transition point {#note-transition}
+
+### Sensitivity to the prior bounds {#omega-prior-bounds}
+
+The $\omega$ prior truncates at 1 and 6 years. Three of four domains' credible intervals sit
+close to the lower bound, so all four models were refitted with bounds widened to 0.5 and 8
+(mean and SD unchanged; `sensitivity_3.2_omega_bounds.R`).
+
+```{r tab-omega-bounds, eval = file.exists("sensitivity_3.2_omega_bounds_table.csv")}
+read.csv('sensitivity_3.2_omega_bounds_table.csv') |>
+  transmute(Domain   = unname(DOMAINS[domain]),
+            headline = sprintf("%.2f [%.2f, %.2f]", headline_mean, headline_lo, headline_hi),
+            widened  = sprintf("%.2f [%.2f, %.2f]", widened_mean, widened_lo, widened_hi),
+            shift    = sprintf("%+.2f", shift)) |>
+  supp_gt("omega_bounds", "Transition point under headline and widened prior bounds",
+          subtitle = "Years since baseline. Both columns are 95% credible intervals.") |>
+  gt::cols_label(headline = "Headline bounds (1, 6)",
+                 widened  = "Widened bounds (0.5, 8)",
+                 shift    = "Shift in mean") |>
+  gt::tab_spanner(lab("&omega; [95% CrI]", "$\\omega$ [95\\% CrI]"), columns = c(headline, widened)) |>
+  gt::cols_align("left", columns = Domain) |>
+  gt::cols_align("right", columns = c(headline, widened, shift))
+```
+
+Episodic and working memory domains are robust to the truncation. Executive function and language
+processing shift more, by 0.17 and 0.15 years, and their lower bounds track the new floor
+rather than stabilising away from it, sitting 0.07 and 0.10 years above it. Executive
+function's widened interval also reaches 6.01 years, past the upper bound of the headline
+prior, so that interval was shaped by the truncation at both ends. We therefore describe
+$\omega$ as data-identified in episodic memory, reasonably robust in working memory, and
+substantially prior-informed in executive function and language processing — including in
+the domain carrying the second supported finding.
+
+### Transition point by group {#omega-by-group}
+
+All four domains were refitted with $\omega \sim 1 + \text{Group}$, $\rho$ fixed at 3 and
+everything else as in the primary specification (`sensitivity_2.3_omega_group.R`).
+
+```{r tab-omega-group, eval = file.exists("sensitivity_2.3_omega_group_table.csv")}
+read.csv('sensitivity_2.3_omega_group_table.csv') |>
+  transmute(Domain    = unname(DOMAINS[domain]),
+            grp       = sprintf("%.2f [%.2f, %.2f]", omega_group_mean,
+                                omega_group_lo90, omega_group_hi90),
+            rhat      = omega_block_max_rhat,
+            bulk      = omega_block_min_bulk,
+            tail      = omega_block_min_tail,
+            preferred = preferred_by_loo,
+            elpd      = sprintf("%.2f (%.2f)", elpd_diff, se_diff)) |>
+  supp_gt("omega_group", "Models allowing the transition point to differ by group",
+          subtitle = paste("Group term in years since baseline, 90% credible interval.",
+                           "Diagnostics are for the ω block; the elpd difference is the",
+                           "group-varying model against the preferred one.")) |>
+  gt::cols_label(grp       = "Group term [90% CrI]",
+                 rhat      = lab("Max R&#770;", "Max $\\hat{R}$"),
+                 bulk      = "Min bulk ESS",
+                 tail      = "Min tail ESS",
+                 preferred = "Preferred",
+                 elpd      = "elpd difference (SE)") |>
+  gt::tab_spanner(lab("&omega; block diagnostics", "$\\omega$ block diagnostics"), columns = c(rhat, bulk, tail)) |>
+  gt::tab_spanner("Leave-one-out", columns = c(preferred, elpd)) |>
+  gt::fmt_number(columns = rhat, decimals = 3) |>
+  gt::fmt_number(columns = c(bulk, tail), decimals = 0) |>
+  gt::cols_align("left", columns = Domain) |>
+  gt::cols_align("right", columns = c(grp, elpd)) |>
+  gt::cols_align("center", columns = preferred) |>
+  mono(preferred)
+```
+
+The group term was well identified in every domain ($\hat{R} \le 1.003$, bulk effective
+sample size $\ge$ 1,242, tail $\ge$ 295) and its posterior was centred close to zero
+throughout, the largest estimate being −1.20 [−2.77, 0.40] years in language processing.
+Leave-one-out comparison preferred the common-transition specification in all four domains,
+by 0.20 to 3.06 elpd units (0.5 to 1.2 standard errors), so allowing the transition point to
+differ by group buys no predictive fit; the Pareto-$\hat{k}$ diagnostics for that comparison
+are themselves unreliable here ([`r sn("diagnostics")`](#note-diagnostics)). A common
+transition point per domain is reported as the primary specification.
+
+## `r sn("subtests")` — Episodic memory refitted to each sub-test {#note-subtests}
+
+To assess whether the composite's transition and group contrast are properties of the
+construct or artefacts of fixed weighting, the episodic model was refitted to each
+constituent sub-test separately, z-scored on the same normative basis
+(`sensitivity_3.3_subtest_refits.R`).
+
+```{r tab-subtests, eval = file.exists("sensitivity_3.3_subtest_table.csv")}
+SUBTESTS <- c(lmi_unit_tot  = "Logical Memory I (immediate recall)",
+              lmii_unit_tot = "Logical Memory II (delayed recall)",
+              ravlt_t15_tot = "RAVLT trials 1–5 total (verbal list learning)",
+              pal_ftm_score = "CANTAB PAL first-trial memory score (paired-associate learning)")
+
+read.csv('sensitivity_3.3_subtest_table.csv') |>
+  transmute(label  = unname(SUBTESTS[subtest]),
+            var    = subtest,
+            N      = n_obs,
+            omega  = sprintf("%.2f [%.2f, %.2f]", omega_mean, omega_q5, omega_q95),
+            ph_b1  = sprintf("%.3f", PH_b1grp),
+            ph_sum = sprintf("%.3f", PH_b1grp_d1grp)) |>
+  supp_gt("subtests", "Episodic memory model refitted to each sub-test",
+          subtitle = sprintf(paste(
+            "Intervals are 90%%. Composite estimates for comparison are in Table 2 (main text)",
+            "and %s."), sn("transition"))) |>
+  gt::cols_label(label  = "Sub-test", var = "Variable", N = "Observations",
+                 omega  = lab("&omega; [90% CrI]", "$\\omega$ [90\\% CrI]"),
+                 ph_b1  = lab("&beta;<sub>1</sub> group", "$\\beta_1$ group"),
+                 ph_sum = lab("&beta;<sub>1</sub> + &delta;<sub>1</sub> group", "$\\beta_1 + \\delta_1$ group")) |>
+  gt::tab_spanner("P(H)", columns = c(ph_b1, ph_sum)) |>
+  gt::fmt_integer(columns = N) |>
+  gt::cols_align("left", columns = c(label, var)) |>
+  gt::cols_align("right", columns = c(omega, ph_b1, ph_sum)) |>
+  mono(var) |>
+  pdf_hide(var)
+```
+
+Interpretation must take account of a design feature of the battery: the four sub-tests
+differ in how much retest practice effect they permit. Because the pre-transition slope
+$\beta_1$ is substantially a practice effect, any instrument that suppresses practice
+compresses the quantity $\beta_1$ measures is not evidence against the composite finding.
+
+The post-transition contrast, which is least confounded with practice, replicates broadly.
+It is supported in three of four sub-tests, including both practice-mitigated instruments
+(verbal list learning and paired-associate learning). Since decline after the transition is
+not a practice phenomenon, this is the more meaningful sub-test replication of the group
+finding, and it holds where practice can't explain it.
+
+## `r sn("attrition")` — Attrition and cognition-related dropout {#note-attrition}
+
+Participants contributed four to seven of up to seven possible assessment waves. Dropout
+related to cognitive status would bias observed trajectories optimistically: participants
+who are declining, or already performing less well, are plausibly more likely to leave, so
+later waves over-represent healthier survivors.
+
+```{r tab-waves}
+sessions_wilcox <- wilcox.test(Sessions ~ Group, data = demographics)
+
+demographics |>
+  mutate(Group = factor(Group, levels = c('Control', 'Experimental'),
+                        labels = c('Control', 'Education'))) |>
+  group_by(Group) |>
+  summarise(N = n(), mean_s = mean(Sessions, na.rm = TRUE),
+            median_s = median(Sessions, na.rm = TRUE), .groups = 'drop') |>
+  supp_gt("waves", "Assessment waves completed by group",
+          subtitle = sprintf("Wilcoxon rank-sum test of waves completed between groups: p = %s.",
+                             fmt_pval(sessions_wilcox$p.value, 2))) |>
+  gt::cols_label(N = "Participants", mean_s = "Mean", median_s = "Median") |>
+  gt::tab_spanner("Waves completed", columns = c(mean_s, median_s)) |>
+  gt::fmt_number(columns = mean_s, decimals = 2) |>
+  gt::fmt_number(columns = median_s, decimals = 0) |>
+  gt::cols_align("left", columns = Group)
+```
+
+```{r tab-baseline-attrition}
+baseline_domains <- d3 |>
+  dplyr::filter(phase == 1) |>
+  transmute(IDCode, Group,
+            episodic, working, language,
+            executive = -executive) |>  # sign-flip to match higher-is-better convention
+  left_join(demographics |> select(IDCode, Sessions), by = 'IDCode') |>
+  mutate(completion = if_else(Sessions >= median(Sessions, na.rm = TRUE),
+                              'More waves', 'Fewer waves'))
+
+attrition_cognition <- baseline_domains |>
+  pivot_longer(cols = c(episodic, working, executive, language),
+               names_to = 'Domain', values_to = 'value') |>
+  group_by(Domain) |>
+  summarise(
+    rho    = suppressWarnings(cor.test(Sessions, value, method = 'spearman')$estimate),
+    p_cor  = suppressWarnings(cor.test(Sessions, value, method = 'spearman')$p.value),
+    mean_more_waves  = mean(value[completion == 'More waves'],  na.rm = TRUE),
+    mean_fewer_waves = mean(value[completion == 'Fewer waves'], na.rm = TRUE),
+    p_ttest = t.test(value ~ completion)$p.value,
+    .groups = 'drop'
+  ) |>
+  mutate(Domain = factor(DOMAINS[Domain], levels = DOMAINS)) |>
+  arrange(Domain)
+
+attrition_cognition |>
+  mutate(p_cor = fmt_pval(p_cor), p_ttest = fmt_pval(p_ttest)) |>
+  supp_gt("baseline_attrition", "Baseline cognition by number of waves completed",
+          subtitle = paste("Baseline composite scores (z; higher is better in every domain).",
+                           "Completion is split at the median number of waves.")) |>
+  gt::cols_label(rho = lab("Spearman &rho;", "Spearman $\\rho$"), p_cor = "p",
+                 mean_more_waves = "At or above median", mean_fewer_waves = "Below median",
+                 p_ttest = "p (Welch t)") |>
+  gt::tab_spanner("Correlation with waves completed", columns = c(rho, p_cor)) |>
+  gt::tab_spanner("Mean baseline score", columns = c(mean_more_waves, mean_fewer_waves, p_ttest)) |>
+  gt::fmt_number(columns = c(rho, mean_more_waves, mean_fewer_waves), decimals = 3) |>
+  gt::cols_align("left", columns = Domain) |>
+  gt::cols_align("right", columns = c(p_cor, p_ttest))
+```
+
+Waves completed did not differ between arms (Wilcoxon p =
+`r round(sessions_wilcox$p.value, 2)`), so differential attrition between groups is not a
+concern for the group contrasts specifically. Baseline episodic memory and language
+processing were both associated with the number of waves completed, while working memory
+and executive function were not.
+
+### Sensitivity refit conditioning on completion {#completion-refit}
+
+To assess how far this could account for the reported slopes, the episodic and language
+models were refitted with the number of waves completed entered on both the intercept and
+the pre-transition slope. If the trajectory findings were an artefact of cognition-related
+dropout, conditioning on completion should attenuate them substantially.
+
+```{r tab-attrition-refit}
+tibble(
+  Domain   = rep(c(DOMAINS[["episodic"]], DOMAINS[["language"]]), each = 2),
+  Contrast = rep(c("β₁ group", "β₁ + δ₁ group"), 2),
+  est_pri  = c(pci(m.ep, GB1, 3),   pci(m.ep, c(GB1, GD1), 3),
+               pci(m.la, GB1, 3),   pci(m.la, c(GB1, GD1), 3)),
+  est_adj  = c(pci(m.ep.s, GB1, 3), pci(m.ep.s, c(GB1, GD1), 3),
+               pci(m.la.s, GB1, 3), pci(m.la.s, c(GB1, GD1), 3)),
+  ph_pri   = c(pH(m.ep, GB1),   pH(m.ep, c(GB1, GD1)),
+               pH(m.la, GB1),   pH(m.la, c(GB1, GD1))),
+  ph_adj   = c(pH(m.ep.s, GB1), pH(m.ep.s, c(GB1, GD1)),
+               pH(m.la.s, GB1), pH(m.la.s, c(GB1, GD1)))
+) |>
+  supp_gt("attrition_refit",
+          "Group contrasts before and after conditioning on waves completed",
+          subtitle = "Estimates are z per year, posterior mean [95% CrI]. Hypothesis: Education > Control.",
+          groupname_col = "Domain") |>
+  gt::cols_label(Contrast = "Contrast", est_pri = "Primary", est_adj = "Adjusted for completion",
+                 ph_pri = "Primary", ph_adj = "Adjusted") |>
+  gt::tab_spanner("Estimate [95% CrI]", columns = c(est_pri, est_adj)) |>
+  gt::tab_spanner("P(H)", columns = c(ph_pri, ph_adj)) |>
+  gt::fmt_number(columns = c(ph_pri, ph_adj), decimals = 3) |>
+  gt::cols_align("left", columns = Contrast) |>
+  gt::cols_align("right", columns = c(est_pri, est_adj))
+```
+
+Conditioning on completion left every contrast essentially unchanged. Had the reported group
+differences been generated by cognition-related dropout, conditioning on realised completion
+should have attenuated them substantially; it does not. The language post-transition
+estimate is if anything slightly larger under adjustment, with a wider interval, which is
+consistent with completion carrying a little of the signal but not with it producing the
+effect.
+
+## `r sn("sbc")` — Simulation-based calibration {#note-sbc}
+
+The exact model configuration reported here — all priors as specified, $\rho$ fixed at 3,
+$\sigma_u$ as specified — was validated by simulation-based calibration [Talts et al. 2020;
+Modrák et al. 2025]. We took 500 replicates per configuration, using a bootstrapped real
+design matrix (covariates only, no cognitive scores) so that covariate collinearity and the
+group imbalance were realistic. Critically, the one-sided contrasts on which the reported
+inferences rest, $\beta_{1,\text{Group}}$ and
+$\beta_{1,\text{Group}} + \delta_{1,\text{Group}}$, were treated as test quantities rather
+than inferred from marginal parameter calibration. This matters because the reported fits
+show a posterior correlation of about $-0.9$ between the two coefficients, so the sum is
+dominated by a dependence that wouldn't be detected by per-parameter rank histograms.
+
+**Evidence-ratio calibration.** Where the model reported an effect in the hypothesized
+direction with probability >0.99, it was replicated through simulation about that often.
+However, almost all simulated datasets ended up in that range because the priors on the
+group coefficients were wider than the effects observed, leaving too few replicates in the
+moderate range to assess calibration there. Calibration in the range that working memory and
+executive function occupy is therefore not established by this run.
+
+**Rank calibration.** Every estimated parameter passed on all 500 replicates and on the
+convergence-filtered subset: $\omega$, $\sigma$, $\sigma_u$, the $\beta_0$ and $\beta_1$
+terms, both $\delta_1$ terms, both inferential contrasts and a joint log-likelihood
+sentinel, each within a 95% simultaneous ECDF confidence band. All 500 fits were free of
+divergent transitions and met the effective-sample-size criterion.
+
+## `r sn("ppc")` — Trace plots and posterior predictive checks {#note-ppc .tabset .tabset-pills}
+
+::: {.fig-caption}
+**`r sf("ppc")` | Trace plots and posterior predictive checks** for each
+domain`r if (knitr::is_html_output()) " (select a tab)"`. Each pair shows the four chains for every estimated parameter and the observed score
+distribution against draws from the posterior predictive distribution.
+:::
+
+### Episodic memory {.unlisted .unnumbered}
+
+```{r fig-diag-episodic, fig.height = 9, fig.width = 11}
+plot(m.ep)
+```
+
+```{r fig-ppc-episodic, fig.height = 5, fig.width = 8}
+pp_check(m.ep)
+```
+
+### Working memory {.unlisted .unnumbered}
+
+```{r fig-diag-working, fig.height = 9, fig.width = 11}
+plot(m.wo)
+```
+
+```{r fig-ppc-working, fig.height = 5, fig.width = 8}
+pp_check(m.wo)
+```
+
+### Executive function {.unlisted .unnumbered}
+
+```{r fig-diag-executive, fig.height = 9, fig.width = 11}
+plot(m.ex)
+```
+
+```{r fig-ppc-executive, fig.height = 5, fig.width = 8}
+pp_check(m.ex)
+```
+
+### Language processing {.unlisted .unnumbered}
+
+```{r fig-diag-language, fig.height = 9, fig.width = 11}
+plot(m.la)
+```
+
+```{r fig-ppc-language, fig.height = 5, fig.width = 8}
+pp_check(m.la)
+```

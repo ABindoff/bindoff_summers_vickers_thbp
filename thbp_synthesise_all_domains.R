@@ -1,7 +1,7 @@
 # Joint synthetic release of the THBP cognitive domains (language, episodic memory,
 # working memory, executive function).
 #
-# One synthesis, one release: baseline characteristics are drawn once and all four
+# One synthesis: baseline characteristics are drawn once and all four
 # domains are synthesised conditional on them, so the released files cannot be
 # averaged or linked against each other to recover real records.
 #
@@ -9,8 +9,7 @@
 # years_since_baseline and the baseline covariates, each with its domain score in `value`.
 # Output: data/synthetic/<domain>.csv, long format, ready for the analysis code.
 #
-# The real data never leave this script's session. Do not commit anything except the
-# synthetic CSVs and this script. `models = FALSE` keeps the fitted trees (which contain
+# `models = FALSE` keeps the fitted trees (which contain
 # real records) out of the synds object.
 
 library(synthpop)
@@ -18,8 +17,12 @@ library(dplyr)
 library(tidyr)
 
 # ---------------------------------------------------------------------------
-# 1. Inputs: edit the object names and covariate names to match yours
+# 1. Inputs
 # ---------------------------------------------------------------------------
+language <- readRDS('./data_flat/language.rds')
+episodic <- readRDS('./data_flat/episodic.rds')
+working <- readRDS('./data_flat/working.rds')
+executive <- readRDS('./data_flat/executive.rds')
 domains <- list(lang = language, epis = episodic, wm = working, ef = executive)
 
 baseline_vars <- c("Group", "Sex", "Age_t1", "education_total", "wtar_fsiq_baseline",
@@ -29,7 +32,7 @@ keys <- c("Group", "Sex", "Age_t1", "education_total")   # what an outsider coul
 # Column that identifies an assessment occasion uniquely within a person and is the SAME
 # occasion across domains (e.g. a wave number or assessment date). years_since_baseline
 # cannot do this: it is in whole years, so two sessions in the same year tie.
-VISIT_KEY <- "session"
+VISIT_KEY <- "phase"
 
 SEED     <- 2026L
 MINBUCKET <- 10L
